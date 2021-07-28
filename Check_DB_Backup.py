@@ -5,8 +5,8 @@ import datetime
 import subprocess
 
 
-#MAIL = 'Dmitriy.Tsvirkun@rosbank.ru'
-MAIL = 'Dmitriy.Tsvirkun@rosbank.ru, Ilya.Mazurin@rosbank.ru, Konstantin.Shchepetev@rosbank.ru'
+
+MAIL = '<< MAIL >>'
 
 DEPH1= 12
 subprocess.call('LC_ALL=C;export LC_ALL;LANG=C;export LANG', shell=True)
