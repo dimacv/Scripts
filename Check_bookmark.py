@@ -4,8 +4,8 @@ import os
 import datetime
 import subprocess
 
-MAIL = 'Dmitriy.Tsvirkun@rosbank.ru, Ilya.Mazurin@rosbank.ru, Konstantin.Shchepetev@rosbank.ru'
-#MAIL = 'Dmitriy.Tsvirkun@rosbank.ru'
+MAIL = '<< MAIL >>'
+
 CheckBookmark_log = '/var/logs/check_bookmark-DPF1.txt'
 DataToday = str(datetime.date.today())
 STR = ['','','']
