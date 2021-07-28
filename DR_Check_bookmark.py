@@ -4,8 +4,8 @@
 import os
 import subprocess
 
-MAIL = 'Dmitriy.Tsvirkun@rosbank.ru, Ilya.Mazurin@rosbank.ru, Konstantin.Shchepetev@rosbank.ru'
-#MAIL = 'Dmitriy.Tsvirkun@rosbank.ru'
+MAIL = '<< MAIL >>'
+
 str1 = []
 DHUB_OK = False
 DWH_OK = False
