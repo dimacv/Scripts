@@ -5,8 +5,8 @@ import os
 import subprocess
 import datetime
 
-MAIL = 'Dmitriy.Tsvirkun@rosbank.ru'
-#MAIL = 'Dmitriy.Tsvirkun@rosbank.ru, Ilya.Mazurin@rosbank.ru, Konstantin.Shchepetev@rosbank.ru'
+MAIL = '<< EMAIL >>'
+
 DataToday = str(datetime.date.today())
 DataToday = DataToday.replace('-', '')
 DataYesterday = str(datetime.date.today() - datetime.timedelta(days=1))
@@ -38,9 +38,9 @@ MART_RUN_NOW = False
 DATAHUB_RUN_NOW = False
 
 subprocess.call('LC_ALL=C;export LC_ALL;LANG=C;export LANG', shell=True)
-strcmd = 'nsrinfo -v -s nwsrv.rosbank.rus.socgen -n db2 -X all rsb-dbpdpfdr1  > ' + NSR_OUT_log + \
-         ';nsrinfo -v -s nwsrv.rosbank.rus.socgen -n db2 -X all rsb-dbpdpfdr2 >> ' + NSR_OUT_log + \
-         ';nsrinfo -v -s nwsrv.rosbank.rus.socgen -n db2 -X all rsb-dbpdpfdr3 >> ' + NSR_OUT_log
+strcmd = 'nsrinfo -v -s << ADDRES >> -n db2 -X all rsb-dbpdpfdr1  > ' + NSR_OUT_log + \
+         ';nsrinfo -v -s << ADDRES >> -n db2 -X all rsb-dbpdpfdr2 >> ' + NSR_OUT_log + \
+         ';nsrinfo -v -s << ADDRES >> -n db2 -X all rsb-dbpdpfdr3 >> ' + NSR_OUT_log
 subprocess.call(strcmd, shell=True)
 
 strcmd = 'sudo -iu db2khdci /db2home/db2khdci/sqllib/adm/db2pd -util -dbp all  | grep bytes > ' + DWH_RUN_log + \
