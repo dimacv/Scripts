@@ -1,79 +1,77 @@
 #!/usr/bin/python3
-###  Audit_AIX_users.py   ###
+###  AuditAIXUsers.py   ###
 
 from __future__ import print_function
 import os
 import platform
-import sys
 import subprocess
 import datetime
-from contextlib import redirect_stdout
-from datetime import datetime
 import re
+import asyncio
 
+# Константы
+OUTSEP = " ; "
+SYSUSER = ["root", "daemon", "bin", "sys", "adm", "uucp", "nuucp", "guest", "lpd", "lp", "nobody", "invscout", "snapp", "ipsec", "pconsole", "esaadmin", "sshd"]
+HEAD = ["Login", "Activ_account", "AdminGroup", "NimeUser", "Time_last_login", "Technological_account"]
 
-outsep = " ; "
-AUDITUSER = []
-inpstr = []
-SYSUSER = ["root","daemon","bin","sys","adm","uucp","nuucp","guest","lpd","lp","nobody","invscout","snapp","ipsec","pconsole","esaadmin","sshd"]
-HEAD = ["Login","Activ_account","AdminGroup","NimeUser","Time_last_login","Technological_account"]
-
-
+# Исключение для неподдерживаемых ОС
 if platform.system() != 'AIX':
-    raise Exception("This script is designed to run under the AIX operating system. If desired, it can be easily converted for any other operating system.")
+    raise Exception("Этот скрипт предназначен для работы в операционной системе AIX.")
 
-##############################################################################################################################
-###             Audit AIX users                                                                                            ###
-##############################################################################################################################
+class AuditAIXUsers:
+    """Класс для аудита пользователей AIX."""
 
-subprocess.call('LC_ALL=C;export LC_ALL;LANG=C;export LANG', shell=True)
+    def __init__(self):
+        self.audit_users = []  # Список для хранения пользователей
+        self.input_strings = []  # Входные данные
 
-#p = subprocess.Popen("lsuser -a account_locked time_last_login groups gecos ALL", shell=True, stdout=subprocess.PIPE)
-p = subprocess.Popen("lsuser -a account_locked  groups gecos ALL", shell=True, stdout=subprocess.PIPE)
-out = p.stdout.readlines()
+    async def execute_command(self, command):
+        """Асинхронное выполнение команды."""
+        process = await asyncio.create_subprocess_shell(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = await process.communicate()
+        if stderr:
+            raise Exception(f"Ошибка выполнения команды: {stderr.decode().strip()}")
+        return stdout.decode().splitlines()
 
-p2 = subprocess.Popen("lsuser -a time_last_login ALL", shell=True, stdout=subprocess.PIPE)
-out2 = p2.stdout.readlines()
+    async def audit_users(self):
+        """Основной метод для аудита пользователей."""
+        # Выполнение команд для получения информации о пользователях
+        user_info = await self.execute_command("lsuser -a account_locked groups gecos ALL")
+        last_login_info = await self.execute_command("lsuser -a time_last_login ALL")
 
-for count, line in enumerate(out):
-    # print(line.strip())
-    #s = re.split(r'[ =]+', str(line.strip()))
-    s = re.split(r'[ ]+', str(line.strip()), 3)
-    s[0] = s[0][2:]
-    s[1] = s[1][15:]
-    if "false" in s[1]:
-        s[1] = "True"
-    else:
-        s[1] = "False"
-    if "admins" in s[2]:
-        s[2] = "True"
-    else:
-        s[2] = " "
-    if(len(s) == 4):
-        s[3] = s[3][6:-1]
-    else:
-        s.append(" ")
-    inpstr.append(s)
+        for count, line in enumerate(user_info):
+            # Обработка информации о пользователе
+            user_data = re.split(r'[ ]+', line.strip(), 3)
+            user_data[0] = user_data[0][2:]
+            user_data[1] = "True" if "false" in user_data[1] else "False"
+            user_data[2] = "True" if "admins" in user_data[2] else " "
+            user_data.append(user_data[3][6:-1] if len(user_data) == 4 else " ")
 
+            # Получение времени последнего входа
+            last_login_data = re.split(r'[=]+', last_login_info[count].strip(), 3)
+            user_data.append(str(datetime.datetime.fromtimestamp(int(last_login_data[1][:-1]))) if len(last_login_data) == 2 else " ")
 
-    s2 = re.split(r'[=]+', str(out2[count].strip()), 3)
-    if (len(s2) == 2):
-        s.append( str( datetime.fromtimestamp( int(s2[1][:-1])) ) )
-    else:
-        s.append("  ")
+            self.input_strings.append(user_data)
 
+        for user in self.input_strings:
+            user.append("False" if user[0].startswith("rb") else "True")
+            if user[0] not in SYSUSER:
+                self.audit_users.append(user)
 
-for count, s in enumerate(iter(inpstr)):
-    if s[0].startswith("rb"):
-        s.append("False")
-    else:
-        s.append("True")
-    if s[0] not in SYSUSER:
-        AUDITUSER.append(s)
+        # Добавление заголовка
+        self.audit_users.insert(0, HEAD)
 
+    def display_audit_results(self):
+        """Метод для отображения результатов аудита."""
+        for user in self.audit_users:
+            print(','.join(map(str, user)))
 
-AUDITUSER.insert(0, HEAD)
+async def main():
+    """Главная асинхронная функция."""
+    audit = AuditAIXUsers()
+    await audit.audit_users()
+    audit.display_audit_results()
 
-for s in AUDITUSER:
-   print( ','.join(map(str, s)) )
-
+# Запуск главной функции
+if __name__ == "__main__":
+    asyncio.run(main())
