@@ -3,76 +3,103 @@
 
 import os
 import subprocess
+import asyncio
 
-MAIL = '<< MAIL >>'
+class DRBookmarkChecker:
+    def __init__(self):
+        self.mail = '<< MAIL >>'
+        self.flags = {
+            'DWH': '/tmp/flag_DR_DWH_bookmark.flg',
+            'MART': '/tmp/flag_DR_MART_bookmark.flg',
+            'DHUB': '/tmp/flag_DR_DATAHUB_bookmark.flg'
+        }
+        self.file_log = '/tmp/DR_CHK_BKMRK.txt'
+        self.check_bookmark_log = '/var/logs/check_bookmark_DR.txt'
+        self.services_status = {
+            'DWH': False,
+            'MART': False,
+            'DHUB': False
+        }
+        self.lang_env_setup()
 
-str1 = []
-DHUB_OK = False
-DWH_OK = False
-MART_OK = False
-FLAG_DWH = '/tmp/flag_DR_DWH_bookmark.flg'
-FLAG_MART = '/tmp/flag_DR_MART_bookmark.flg'
-FLAG_DHUB = '/tmp/flag_DR_DATAHUB_bookmark.flg'
-FILE_LOG = '/tmp/DR_CHK_BKMRK.txt'
-Checkbookmark_log = '/var/logs/check_bookmark_DR.txt'
+    def lang_env_setup(self):
+        """Настройка локализации среды."""
+        subprocess.call('LC_ALL=C;export LC_ALL;LANG=C;export LANG', shell=True)
 
-subprocess.call('LC_ALL=C;export LC_ALL;LANG=C;export LANG', shell=True)
-subprocess.call('/db2home/scripts/init_db/check_snapshot_full_output.sh > ' + FILE_LOG + ' 2>/dev/null', shell=True)
+    async def check_bookmark(self):
+        """Основная логика для проверки закладки DR."""
+        await self.run_snapshot_check()
+        await self.process_log_file()
+        await self.write_flags()
+        await self.send_email()
+        await self.log_results()
 
-file = open(FILE_LOG, 'r')
-inp = file.readlines()
+    async def run_snapshot_check(self):
+        """Запуск команды для проверки снапшотов."""
+        cmd = f'/db2home/scripts/init_db/check_snapshot_full_output.sh > {self.file_log} 2>/dev/null'
+        await subprocess.call(cmd, shell=True)
 
-for i in iter(inp):
-    str1.append(i)
-    if 'Storage access: LOGGED ACCESS' in i and 'DHUB_CG' in str1[-11]:
-        DHUB_OK = True
+    async def process_log_file(self):
+        """Обработка логов из файла."""
+        try:
+            with open(self.file_log, 'r') as file:
+                lines = file.readlines()
 
-    if 'Storage access: LOGGED ACCESS' in i and 'DWH_CG' in str1[-11]:
-        DWH_OK = True
+            str1 = []
+            for line in lines:
+                str1.append(line)
+                if 'Storage access: LOGGED ACCESS' in line:
+                    if 'DHUB_CG' in str1[-11]:
+                        self.services_status['DHUB'] = True
+                    elif 'DWH_CG' in str1[-11]:
+                        self.services_status['DWH'] = True
+                    elif 'MART_CG' in str1[-11]:
+                        self.services_status['MART'] = True
 
-    if 'Storage access: LOGGED ACCESS' in i and 'MART_CG' in str1[-11]:
-        MART_OK = True
+        except FileNotFoundError:
+            print(f"Лог файл {self.file_log} не найден!")
 
+    async def write_flags(self):
+        """Запись результатов в файлы флагов."""
+        for service, flag_file in self.flags.items():
+            with open(flag_file, 'w') as flag:
+                flag.write('1\n' if self.services_status[service] else '0\n')
 
-f_MART= open(FLAG_MART, 'w')
-f_DWH = open(FLAG_DWH, 'w')
-f_DHUB = open(FLAG_DHUB, 'w')
+    async def send_email(self):
+        """Отправка email с результатами проверки закладки."""
+        message = self.generate_message()
+        cmd = f'echo "{message}" | mail -s ">>>--- DR BOOKMARK TODAYS ---<<<" {self.mail}'
+        await subprocess.call(cmd, shell=True)
 
-if DHUB_OK:
-    MESSAGE = ' OK. DHUB_CG - DR bookmark todays succeeded!\n'
-    f_DHUB.write('1' + '\n')
-else:
-    MESSAGE = 'FAILED !!!.  DHUB_CG  - DR bookmark todays is NOT complete!!!\n'
-    f_DHUB.write('0' + '\n')
+    def generate_message(self):
+        """Генерация сообщения о статусе DR закладок."""
+        message = ''
+        if self.services_status['DHUB']:
+            message += 'OK. DHUB_CG - DR bookmark todays succeeded!\n'
+        else:
+            message += 'FAILED !!!.  DHUB_CG - DR bookmark todays is NOT complete!!!\n'
 
-if DWH_OK:
-    MESSAGE = MESSAGE + ' OK. DWH_CG  - DR bookmark todays succeeded!\n'
-    f_DWH.write('1' + '\n')
-else:
-    MESSAGE = MESSAGE + 'FAILED !!!.  DWH_CG  - DR bookmark todays is NOT complete!!!\n'
-    f_DWH.write('0' + '\n')
+        if self.services_status['DWH']:
+            message += 'OK. DWH_CG - DR bookmark todays succeeded!\n'
+        else:
+            message += 'FAILED !!!.  DWH_CG - DR bookmark todays is NOT complete!!!\n'
 
-if MART_OK:
-    MESSAGE = MESSAGE + ' OK. MART_CG - DR bookmark todays succeeded!'
-    f_MART.write('1' + '\n')
-else:
-    MESSAGE = MESSAGE + 'FAILED !!!.  MART_CG  - DR bookmark todays is NOT complete!!!'
-    f_MART.write('0' + '\n')
+        if self.services_status['MART']:
+            message += 'OK. MART_CG - DR bookmark todays succeeded!'
+        else:
+            message += 'FAILED !!!.  MART_CG - DR bookmark todays is NOT complete!!!'
 
-f_MART.close()
-f_DWH.close()
-f_DHUB.close()
+        return message
 
+    async def log_results(self):
+        """Запись результатов в лог."""
+        message = self.generate_message()
+        with open(self.check_bookmark_log, 'w') as log_file:
+            log_file.write(message)
 
-print( MESSAGE) # Test in consol
-cmd = 'echo "' + MESSAGE + '" | mail -s ">>>--- DR BOOKMARK TODAYS ---<<<" ' + MAIL
-p = subprocess.call(cmd, shell=True)
+async def main():
+    checker = DRBookmarkChecker()
+    await checker.check_bookmark()
 
-
-file.close()
-
-with open(Checkbookmark_log,'w') as f_Chbkm:
-    inp = f_Chbkm.writelines(MESSAGE)
-
-
-
+if __name__ == "__main__":
+    asyncio.run(main())
