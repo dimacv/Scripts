@@ -3,41 +3,79 @@
 import os
 import datetime
 import subprocess
+import asyncio
 
-MAIL = '<< MAIL >>'
+class BookmarkChecker:
+    def __init__(self):
+        self.mail = '<< MAIL >>'
+        self.check_bookmark_log = '/var/logs/check_bookmark-DPF1.txt'
+        self.data_today = str(datetime.date.today())
+        self.str_buffer = ['', '', '']
+        self.backup_bookmark_success = False
+        self.flag_file = '/tmp/flag_bookmark.flg'
+        self.log_file = '/db2home/scripts/DB2_RP.sh.log'
+        self.lang_env_setup()
 
-CheckBookmark_log = '/var/logs/check_bookmark-DPF1.txt'
-DataToday = str(datetime.date.today())
-STR = ['','','']
-BCKP_BOOKM=False
-subprocess.call('LC_ALL=C;export LC_ALL;LANG=C;export LANG', shell=True)
+    def lang_env_setup(self):
+        """Настройка локализации среды."""
+        subprocess.call('LC_ALL=C;export LC_ALL;LANG=C;export LANG', shell=True)
 
-inp = open('/db2home/scripts/DB2_RP.sh.log', 'r',encoding='cp1251').readlines()
-f = open('/tmp/flag_bookmark.flg','w')
+    async def check_bookmark(self):
+        """Основная логика для проверки закладки."""
+        try:
+            with open(self.log_file, 'r', encoding='cp1251') as file:
+                lines = file.readlines()
 
-for i in iter(inp):
-    STR[2]=STR[1]
-    STR[1] = STR[0]
-    STR[0] = i
-    if DataToday  in i and 'Request for bookmark registered successfully.' in STR[2]:
-        BCKP_BOOKM=True
+            for line in lines:
+                self.str_buffer[2] = self.str_buffer[1]
+                self.str_buffer[1] = self.str_buffer[0]
+                self.str_buffer[0] = line
 
+                if self.data_today in line and 'Request for bookmark registered successfully.' in self.str_buffer[2]:
+                    self.backup_bookmark_success = True
 
+            await self.process_result()
 
-if BCKP_BOOKM:
-    MESSAGE = 'OK. Todays - ' +  DataToday + ' - bookmark backup succeeded!'
-    cmd='echo "OK. Todays - ' +  DataToday + ' - bookmark backup succeeded!" | mail -s "OK. Todays -' +  DataToday + ' - bookmark backup succeeded!" ' + MAIL
-    p=subprocess.call(cmd, shell=True)
-    f.write('1' + '\n')
-else:
-    MESSAGE = 'FAILED !!!.  Todays - ' +  DataToday + ' -  bookmark is NOT complete!!! '
-    cmd='echo "FAILED !!!.  Todays - ' +  DataToday + ' -  bookmark is NOT complete!!! " | mail -s "FAILED !!!. Todays ' +  DataToday + ' - bookmark is NOT complete!!!" '  + MAIL
-    p=subprocess.call(cmd, shell=True)
-    f.write('0' + '\n')
+        except FileNotFoundError:
+            print(f"Лог файл {self.log_file} не найден!")
 
-f.close()
-with open(CheckBookmark_log,'w') as f_ChNet:
-    inp = f_ChNet.writelines(MESSAGE)
+    async def process_result(self):
+        """Обработка результатов проверки."""
+        if self.backup_bookmark_success:
+            message = f'OK. Today\'s - {self.data_today} - bookmark backup succeeded!'
+            await self.send_email(message, 'OK')
+            await self.write_flag('1')
+        else:
+            message = f'FAILED !!!. Today\'s - {self.data_today} - bookmark is NOT complete!!!'
+            await self.send_email(message, 'FAILED')
+            await self.write_flag('0')
 
-subprocess.call('scp /var/logs/check_bookmark-DPF1.txt rsb-dbpdpfdr1:/var/logs/check_bookmark-DPF1.txt', shell=True)
+        await self.log_to_file(message)
+        await self.copy_log_file()
 
+    async def send_email(self, message, status):
+        """Отправка email с результатами."""
+        cmd = f'echo "{message}" | mail -s "{status}. Today\'s - {self.data_today} - bookmark backup" {self.mail}'
+        await subprocess.call(cmd, shell=True)
+
+    async def write_flag(self, status):
+        """Запись флага о результате."""
+        with open(self.flag_file, 'w') as flag:
+            flag.write(f'{status}\n')
+
+    async def log_to_file(self, message):
+        """Запись сообщений в лог файл."""
+        with open(self.check_bookmark_log, 'w') as log_file:
+            log_file.write(message)
+
+    async def copy_log_file(self):
+        """Копирование лог файла на удалённый сервер."""
+        cmd = 'scp /var/logs/check_bookmark-DPF1.txt rsb-dbpdpfdr1:/var/logs/check_bookmark-DPF1.txt'
+        await subprocess.call(cmd, shell=True)
+
+async def main():
+    checker = BookmarkChecker()
+    await checker.check_bookmark()
+
+if __name__ == "__main__":
+    asyncio.run(main())
