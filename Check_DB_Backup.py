@@ -3,179 +3,134 @@
 import os
 import datetime
 import subprocess
+import asyncio
 
+class DBBackupChecker:
+    def __init__(self):
+        self.mail = '<< MAIL >>'
+        self.deph1 = 12
+        self.today = str(datetime.date.today())
+        self.year = self.today[:4]
+        self.yesterday = str(datetime.date.today() - datetime.timedelta(days=1))
+        self.init_db_log_dir = '/db2home/scripts/init_db/log/'
+        self.flags = {
+            'DWH': '/tmp/flag_DWH_backup.flg',
+            'MART': '/tmp/flag_MART_backup.flg',
+            'DATAHUB': '/tmp/flag_DATAHUB_backup.flg'
+        }
+        self.summary_log_name = '/var/log/DB_BAckup.log'
+        self.check_db_backup_log = '/var/logs/check_DB_backup.txt'
+        self.backup_status = {
+            'DWH': False,
+            'MART': False,
+            'DATAHUB': False
+        }
+        self.message = ''
+        self.all_data = set()
 
+    def enumerate_files(self):
+        file_collection = []
+        for dirpath, dirnames, filenames in os.walk(self.init_db_log_dir):
+            for file in filenames:
+                file_collection.append(file)
+        return file_collection
 
-MAIL = '<< MAIL >>'
+    async def check_backups(self):
+        file_logs = self.enumerate_files()
+        for file in file_logs:
+            if self.year in file[:4]:
+                self.all_data.add(file[:10])
+        self.all_data = sorted(self.all_data, reverse=True)
 
-DEPH1= 12
-subprocess.call('LC_ALL=C;export LC_ALL;LANG=C;export LANG', shell=True)
-DataToday = str(datetime.date.today())
-ThisYear = DataToday[:4]
-DataYesterday = str(datetime.date.today() - datetime.timedelta(days=1) )
-DIR_init_db_log = '/db2home/scripts/init_db/log/'
-FLAG_DWH = '/tmp/flag_DWH_backup.flg'
-FLAG_MART = '/tmp/flag_MART_backup.flg'
-FLAG_DHUB = '/tmp/flag_DATAHUB_backup.flg'
-SummaryLog_Name = '/var/log/DB_BAckup.log'
-CheckDBbckp_log = '/var/logs/check_DB_backup.txt'
-DWH_OK=False
-DHUB_OK=False
-MART_OK=False
-MART_D_OK=False
-DWH_D_OK=False
-DHUB_D_OK=False
-FILE_MART_LOG = ''
-FILE_DWH_LOG = ''
-FILE_DATAHUB_LOG = ''
-MESSAGE = ''
-STR1=[]
-ALL_DATA = set()
+        # Логика проверки резервного копирования
+        await self.evaluate_backups()
 
-def enumeratefiles(path):
-    file_collection = []
-    for dirpath, dirnames, filenames in os.walk(path):
-        for file in filenames:
-            file_collection.append(file)
-    return file_collection
+    async def evaluate_backups(self):
+        count_data = 0
+        for data in self.all_data:
+            count_data += 1
+            self.backup_status = {'DWH': False, 'MART': False, 'DATAHUB': False}
+            self.check_backup_for(data)
 
-FILE_LOGS_NAME = enumeratefiles(DIR_init_db_log)
-for i in FILE_LOGS_NAME:
-    if ThisYear in i[:4]:
-        ALL_DATA.add(i[:10])
-ALL_DATA = sorted(ALL_DATA,reverse=True)
-#if ALL_DATA[0] ==  DataToday :
-#    ALL_DATA = ALL_DATA[1:]
-f_SummLog = open(SummaryLog_Name, 'w')
-f_SummLog.close()
+            # Запись результатов
+            self.log_results(data, count_data)
 
-count_data = 0
-for DATA in ALL_DATA:
-    count_data = count_data + 1
-    DWH_OK = False
-    DHUB_OK = False
-    MART_OK = False
-    MART_D_OK = False
-    DWH_D_OK = False
-    DHUB_D_OK = False
+        # Отправка сообщения о статусе резервного копирования
+        await self.send_email()
 
-    for i in FILE_LOGS_NAME:
-        if DATA in i :
-            if 'MART' in i:
-                FILE_MART_LOG = i
-            elif 'DWH' in i:
-                FILE_DWH_LOG = i
-            elif  'DATAHUB' in i:
-                FILE_DATAHUB_LOG = i
+    def check_backup_for(self, data):
+        file_logs = self.enumerate_files()
+        for file in file_logs:
+            if data in file:
+                if 'MART' in file:
+                    self.check_mart_backup(file)
+                elif 'DWH' in file:
+                    self.check_dwh_backup(file)
+                elif 'DATAHUB' in file:
+                    self.check_datahub_backup(file)
 
+    def check_mart_backup(self, file):
+        with open(os.path.join(self.init_db_log_dir, file)) as f:
+            lines = f.readlines()
+            if any('+ exit 0' in line and 'NMDA backup was successful.' in lines[max(0, i - self.deph1):i] for i, line in enumerate(lines)):
+                self.backup_status['MART'] = True
 
-    if FILE_MART_LOG == '':
-        print('FAILED !!!.  MART - backup is NOT succeeded (not found the log of the corresponding backup) !!!')
-    else:
-        file = open(DIR_init_db_log + FILE_MART_LOG)
-        inp = file.readlines()
-        for ii in iter(inp):
-            STR1.append(ii)
-            if '+ exit 0' in ii :# and 'NMDA backup was successful.' in STR1[-9]:
-                for iii in range(DEPH1):
-                    if 'NMDA backup was successful.' in STR1[-iii]:
-                        MART_OK = True
+    def check_dwh_backup(self, file):
+        with open(os.path.join(self.init_db_log_dir, file)) as f:
+            lines = f.readlines()
+            if any('+ exit 0' in line and 'NMDA backup was successful.' in lines[max(0, i - self.deph1):i] for i, line in enumerate(lines)):
+                self.backup_status['DWH'] = True
 
+    def check_datahub_backup(self, file):
+        with open(os.path.join(self.init_db_log_dir, file)) as f:
+            lines = f.readlines()
+            if any('+ exit 0' in line and 'NMDA backup was successful.' in lines[max(0, i - self.deph1):i] for i, line in enumerate(lines)):
+                self.backup_status['DATAHUB'] = True
 
-    if FILE_DWH_LOG == '':
-        print('FAILED !!!.  DWH - backup is NOT succeeded (not found the log of the corresponding backup) !!!')
-    else:
-        file = open(DIR_init_db_log + FILE_DWH_LOG)
-        inp = file.readlines()
-        for ii in iter(inp):
-            STR1.append(ii)
-            if '+ exit 0' in ii :# and 'NMDA backup was successful.' in STR1[-9]:
-                for iii in range(DEPH1):
-                    if 'NMDA backup was successful.' in STR1[-iii]:
-                        DWH_OK = True
+    def log_results(self, data, count_data):
+        with open(self.flags['MART'], 'w') as f_mart, \
+             open(self.flags['DWH'], 'w') as f_dwh, \
+             open(self.flags['DATAHUB'], 'w') as f_dhub, \
+             open(self.summary_log_name, 'a') as f_summ_log:
 
+            if self.backup_status['MART']:
+                if count_data <= 7:
+                    self.message += f'\n------------------------------------------------\n{data}:\n+      OK        MART  -  backup succeeded!\n'
+                f_mart.write('1\n')
+                f_summ_log.write(f'{data};MART;True\n')
+            else:
+                if count_data <= 7:
+                    self.message += f'\n------------------------------------------------\n{data}:\n--  FAILED   MART  -  backup is NOT succeeded!!!\n'
+                f_mart.write('0\n')
+                f_summ_log.write(f'{data};MART;False\n')
 
+            if self.backup_status['DWH']:
+                if count_data <= 7:
+                    self.message += '+      OK        DWH   -  backup succeeded!\n'
+                f_dwh.write('1\n')
+                f_summ_log.write(f'{data};DWH;True\n')
+            else:
+                if count_data <= 7:
+                    self.message += '--  FAILED   DWH   -  backup is NOT succeeded!!!\n'
+                f_dwh.write('0\n')
+                f_summ_log.write(f'{data};DWH;False\n')
 
-    if FILE_DATAHUB_LOG =='':
-        print('FAILED !!!.  DATAHUB - backup is NOT succeeded (not found the log of the corresponding backup) !!!')
-    else:
-        #print ('DATAHUB = ' + FILE_DATAHUB_LOG)
-        file = open(DIR_init_db_log + FILE_DATAHUB_LOG)
-        inp = file.readlines()
-        for ii in iter(inp):
-            STR1.append(ii)
-            if '+ exit 0' in ii :
-                for iii in range(DEPH1):
-                    if 'NMDA backup was successful.' in STR1[-iii]:
-                        DHUB_OK = True
+            if self.backup_status['DATAHUB']:
+                if count_data <= 7:
+                    self.message += '+      OK        DHUB  -  backup succeeded!'
+                f_dhub.write('1\n')
+                f_summ_log.write(f'{data};DHUB;True\n')
+            else:
+                if count_data <= 7:
+                    self.message += '--  FAILED   DHUB  -  backup is NOT succeeded!!!'
+                f_dhub.write('0\n')
+                f_summ_log.write(f'{data};DHUB;False\n')
 
-    f_MART= open(FLAG_MART, 'w')
-    f_DWH = open(FLAG_DWH, 'w')
-    f_DHUB = open(FLAG_DHUB, 'w')
-    f_SummLog = open(SummaryLog_Name, 'a')
+    async def send_email(self):
+        cmd = f'echo "Paragraph < 3 > in the technical assignment : {self.message}" | mail -s ">>>--- Paragraph < 3 > in the technical assignment - MART,DWH,DATAHUB DB BACKUP ---<<<" {self.mail}'
+        await subprocess.call(cmd, shell=True)
 
-    if MART_OK:
-        if count_data <=7:
-            MESSAGE = MESSAGE+'\n------------------------------------------------\n'+DATA+':\n+      OK        MART  -  backup succeeded!\n'
-        if count_data == 1:
-            f_MART.write('1' + '\n')
-        f_SummLog.write( DATA + ';MART;True\n')
-    else:
-        if count_data <= 7:
-             MESSAGE = MESSAGE + '\n------------------------------------------------\n'+DATA + ':\n--  FAILED   MART  -  backup is NOT succeeded!!!\n'
-        if count_data == 1:
-             f_MART.write('0' + '\n')
-        f_SummLog.write(DATA + ';MART;False\n')
-
-    if DWH_OK:
-        if count_data <= 7:
-            MESSAGE = MESSAGE + '+      OK        DWH   -  backup succeeded!\n'
-        if count_data == 1:
-            f_DWH.write('1' + '\n')
-        f_SummLog.write(DATA + ';DWH;True\n')
-    else:
-        if count_data <= 7:
-            MESSAGE = MESSAGE + '--  FAILED   DWH   -  backup is NOT succeeded!!!\n'
-        if count_data == 1:
-            f_DWH.write('0' + '\n')
-        f_SummLog.write(DATA + ';DWH;False\n')
-
-    if DHUB_OK:
-        if count_data <= 7:
-            MESSAGE = MESSAGE + '+      OK        DHUB  -  backup succeeded!'
-        if count_data == 1:
-            f_DHUB.write('1' + '\n')
-        f_SummLog.write(DATA + ';DHUB;True\n')
-    else:
-        if count_data <= 7:
-            MESSAGE = MESSAGE + '--  FAILED   DHUB  -  backup is NOT succeeded!!!'
-        if count_data == 1:
-            f_DHUB.write('0' + '\n')
-        f_SummLog.write(DATA + ';DHUB;False\n')
-
-    f_MART.close()
-    f_DWH.close()
-    f_DHUB.close()
-
-#print(MESSAGE)
-cmd='echo "Paragraph < 3 > in the technical assignment : ' + MESSAGE + '" | mail -s ">>>--- Paragraph < 3 > in the technical assignment - MART,DWH,DATAHUB   DB BACKUP ---<<<" ' + MAIL
-p=subprocess.call(cmd, shell=True)
-file.close()
-f_SummLog.close()
-
-with open(CheckDBbckp_log,'w') as f_ChDB:
-    inp = f_ChDB.writelines(MESSAGE)
-
-###############################################################
-'''
-+   OK       MART  -  backup succeeded!
---  FAILED   MART  -  backup is NOT succeeded!!!
-------------------------------------------------
-+   OK       DWH   -  backup succeeded!
---  FAILED   DWH   -  backup is NOT succeeded!!!
-+   OK       DHUB  -  backup succeeded!
---  FAILED   DHUB  -  backup is NOT succeeded!!!
-
-
-
-'''
+# Основной блок запуска
+if __name__ == '__main__':
+    checker = DBBackupChecker()
+    asyncio.run(checker.check_backups())
